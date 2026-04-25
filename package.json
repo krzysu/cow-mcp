@@ -1,0 +1,67 @@
+{
+  "name": "cow-mcp",
+  "version": "0.1.0",
+  "description": "MCP server exposing CoW Protocol to AI agents (read-only v0.1).",
+  "type": "module",
+  "bin": {
+    "cow-mcp": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src test --ext .ts --cache --cache-location node_modules/.cache/eslint",
+    "lint:fix": "eslint src test --ext .ts --fix --cache --cache-location node_modules/.cache/eslint",
+    "prettier:check": "prettier --check \"{src,test}/**/*.{ts,md,json}\" \"*.{md,json}\"",
+    "prettier:write": "prettier --write \"{src,test}/**/*.{ts,md,json}\" \"*.{md,json}\"",
+    "check": "pnpm typecheck && pnpm prettier:check && pnpm lint && pnpm test",
+    "fix": "pnpm prettier:write && pnpm lint:fix",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "pnpm check && pnpm build"
+  },
+  "keywords": [
+    "mcp",
+    "cow-protocol",
+    "cowswap",
+    "defi",
+    "ai"
+  ],
+  "license": "MIT",
+  "author": "Kris Urbas (https://github.com/krzysu)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/krzysu/cow-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/krzysu/cow-mcp/issues"
+  },
+  "homepage": "https://github.com/krzysu/cow-mcp#readme",
+  "packageManager": "pnpm@10.32.1",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@cowprotocol/cow-sdk": "9.0.2",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@types/node": "^22.10.0",
+    "eslint": "^9.39.4",
+    "eslint-plugin-import": "^2.32.0",
+    "prettier": "^3.8.3",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.59.0",
+    "vitest": "^2.1.8"
+  }
+}
