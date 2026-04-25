@@ -1,18 +1,21 @@
 import { z } from 'zod';
+import { blockTimestamps } from '../cow/block_time.js';
 import { DEFAULT_CHAIN_ID } from '../cow/chains.js';
 import { ctx, getCow } from '../cow/client.js';
 import { toMcpError, withRetry } from '../errors.js';
+import { AddressSchema, checksumAddress } from '../validators.js';
 import { lookupTokenMeta } from './list_tokens.js';
 
 export const GetTradesInput = {
   chainId: z.number().int().default(DEFAULT_CHAIN_ID),
-  owner: z.string().describe('Trader address (0x)'),
+  owner: AddressSchema.describe('Trader address (0x)'),
   limit: z.number().int().positive().max(100).optional().describe('Default 25, max 100'),
 };
 
 export type TradeOutput = {
   orderUid: string;
   blockNumber: number;
+  blockTimestamp?: string;
   logIndex: number;
   sellToken: string;
   buyToken: string;
@@ -39,22 +42,30 @@ export async function getTrades(args: {
     const sliced = trades.slice(0, limit);
 
     const addrs = new Set<string>();
+    const blocks = new Set<number>();
     for (const t of sliced) {
       addrs.add(t.sellToken.toLowerCase());
       addrs.add(t.buyToken.toLowerCase());
+      blocks.add(t.blockNumber);
     }
-    // Token list lookup is cached and best-effort — if it fails, return raw addresses.
-    const meta = await lookupTokenMeta(args.chainId, [...addrs]).catch(() => new Map());
+    // Token + timestamp lookups are cached and best-effort — if either RPC
+    // path fails we still return the raw orderbook fields.
+    const [meta, times] = await Promise.all([
+      lookupTokenMeta(args.chainId, [...addrs]).catch(() => new Map()),
+      blockTimestamps(args.chainId, [...blocks]).catch(() => new Map()),
+    ]);
 
     return sliced.map((t) => {
       const sell = meta.get(t.sellToken.toLowerCase());
       const buy = meta.get(t.buyToken.toLowerCase());
+      const ts = times.get(t.blockNumber);
       return {
         orderUid: t.orderUid,
         blockNumber: t.blockNumber,
+        ...(ts ? { blockTimestamp: ts } : {}),
         logIndex: t.logIndex,
-        sellToken: t.sellToken,
-        buyToken: t.buyToken,
+        sellToken: checksumAddress(t.sellToken),
+        buyToken: checksumAddress(t.buyToken),
         ...(sell ? { sellTokenSymbol: sell.symbol, sellTokenDecimals: sell.decimals } : {}),
         ...(buy ? { buyTokenSymbol: buy.symbol, buyTokenDecimals: buy.decimals } : {}),
         sellAmount: t.sellAmount,

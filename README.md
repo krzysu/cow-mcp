@@ -14,11 +14,6 @@ MCP (Model Context Protocol) server exposing [CoW Protocol](https://cow.fi) to A
 | `cow_list_chains` | All chains CoW supports (id, name, native symbol)         |
 | `cow_list_tokens` | Supported tokens for a chain, optional symbol/name search |
 
-## Resources
-
-- `cow://order/{chainId}/{uid}` — pin an order, re-read cheaply for status updates
-- `cow://trades/{chainId}/{owner}` — last 25 trades for a wallet
-
 ## Cross-chain
 
 Every tool takes a `chainId` parameter, so an agent can quote on Ethereum, pull trades from Arbitrum, and list tokens on Base in the same session. `chainId` defaults to `1` (Ethereum) when omitted.

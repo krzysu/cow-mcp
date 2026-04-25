@@ -133,15 +133,6 @@ with `{symbol, decimals}` when possible. Resolution is best-effort and tiered:
 When resolution fails, the `*Symbol` / `*Decimals` fields are simply omitted
 — callers always get the raw `*Token` address as a stable fallback.
 
-### Resources
-
-- `cow://order/{chainId}/{uid}` — same shape as `cow_get_order`. Lets agents
-  pin an order into context and re-read cheaply.
-- `cow://trades/{chainId}/{owner}` — last 25 trades.
-
-Resources should set `mimeType: "application/json"` and short cache hints
-(orders are eventually-consistent within ~1 block).
-
 ### Errors
 
 Map upstream errors to `McpError` codes:
@@ -149,60 +140,6 @@ Map upstream errors to `McpError` codes:
 - `404 NotFound` from orderbook → `InvalidRequest` ("order not found").
 - `400 InvalidQuote` → `InvalidRequest` with the orderbook reason verbatim.
 - `5xx` / network → `InternalError`, retried once with 250ms backoff.
-
-### Configuration
-
-Environment variables, all optional:
-
-- `COW_DEFAULT_CHAIN_ID` — default `1`.
-- `COW_ORDERBOOK_BASE` — override base URL (for staging / barn).
-- `COW_RPC_URL_<CHAIN_ID>` — RPC for token metadata fallback.
-- `COW_TOKEN_LIST_URL` — override the default token list source.
-
-No secrets in v0.1.
-
-### Stack
-
-- TypeScript, ESM, Node 20+.
-- `@modelcontextprotocol/sdk` (stdio transport).
-- `@cowprotocol/cow-sdk` for orderbook calls + types.
-- `zod` for tool input schemas.
-- `vitest` for tests.
-
-### Project layout
-
-```
-cow-mcp/
-  package.json
-  tsconfig.json
-  src/
-    index.ts             # entrypoint, transport wiring
-    server.ts            # MCP server, tool + resource registration
-    cow/
-      client.ts          # thin wrapper over cow-sdk OrderBookApi
-      chains.ts          # chainId <-> name, defaults
-    tools/
-      get_quote.ts
-      get_order.ts
-      get_trades.ts
-      list_tokens.ts
-    resources/
-      order.ts
-      trades.ts
-    errors.ts
-  test/
-    tools/*.test.ts      # mocked orderbook
-  README.md
-```
-
-### Acceptance criteria for v0.1
-
-1. Agent in Claude Desktop can call all four tools and get correct results
-   against mainnet for at least three sample orders/wallets.
-2. `cow://order/...` resource is readable and matches `cow_get_order`.
-3. Errors surface as readable strings (no raw stack traces).
-4. `pnpm test` is green; CI runs lint + typecheck + tests.
-5. README documents install, configure, and a one-prompt demo.
 
 ---
 
@@ -430,10 +367,10 @@ the multi-step + safety-gate shape is genuine.
   the supported chains, group by token pair, summarize volume / realized
   PnL, optionally cross-reference `cow_native_price`. Read-only, but the
   cross-chain + aggregation logic is non-trivial to re-derive each turn.
-- **`cow-order-watch`** — pin `cow://order/{chainId}/{uid}` resources and
-  produce status-transition reports (`open → fulfilled`, `→ expired`,
-  partial fills). Useful for long-running agent sessions babysitting open
-  orders.
+- **`cow-order-watch`** — re-poll `cow_get_order` for one or more order
+  uids and produce status-transition reports (`open → fulfilled`,
+  `→ expired`, partial fills). Useful for long-running agent sessions
+  babysitting open orders.
 
 ### What stays in a tool vs. a skill
 

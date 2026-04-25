@@ -2,11 +2,12 @@ import { z } from 'zod';
 import { DEFAULT_CHAIN_ID } from '../cow/chains.js';
 import { ctx, getCow } from '../cow/client.js';
 import { toMcpError, withRetry } from '../errors.js';
+import { OrderUidSchema, checksumAddress } from '../validators.js';
 import { lookupTokenMeta } from './list_tokens.js';
 
 export const GetOrderInput = {
   chainId: z.number().int().default(DEFAULT_CHAIN_ID),
-  uid: z.string().describe('Order UID (0x-prefixed)'),
+  uid: OrderUidSchema.describe('Order UID: 0x-prefixed 56-byte hex (114 chars)'),
 };
 
 type OrderStatus = 'open' | 'fulfilled' | 'cancelled' | 'expired' | 'unknown';
@@ -60,10 +61,10 @@ export async function getOrder(args: { chainId: number; uid: string }): Promise<
 
     return {
       uid: order.uid,
-      owner: order.owner,
+      owner: checksumAddress(order.owner),
       status: STATUS_MAP[order.status] ?? 'unknown',
-      sellToken: order.sellToken,
-      buyToken: order.buyToken,
+      sellToken: checksumAddress(order.sellToken),
+      buyToken: checksumAddress(order.buyToken),
       ...(sell ? { sellTokenSymbol: sell.symbol, sellTokenDecimals: sell.decimals } : {}),
       ...(buy ? { buyTokenSymbol: buy.symbol, buyTokenDecimals: buy.decimals } : {}),
       sellAmount: order.sellAmount,

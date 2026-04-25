@@ -1,6 +1,4 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { orderTemplate, readOrder } from './resources/order.js';
-import { readTrades, tradesTemplate } from './resources/trades.js';
 import { GetOrderInput, getOrder } from './tools/get_order.js';
 import { GetQuoteInput, getQuote } from './tools/get_quote.js';
 import { GetTradesInput, getTrades } from './tools/get_trades.js';
@@ -10,7 +8,7 @@ import { ListTokensInput, listTokens } from './tools/list_tokens.js';
 export function createServer(): McpServer {
   const server = new McpServer(
     { name: 'cow-mcp', version: '0.1.0' },
-    { capabilities: { tools: {}, resources: {} } }
+    { capabilities: { tools: {} } }
   );
 
   server.registerTool(
@@ -18,7 +16,7 @@ export function createServer(): McpServer {
     {
       title: 'Get a CoW Protocol quote',
       description:
-        'Indicative price + fee for a swap. Returns sellAmount, buyAmount, feeAmount, validTo, quoteId.',
+        'Indicative price + fee for a swap. Returns sellAmount, buyAmount, feeAmount, validTo, quoteId. Throws InvalidRequest on unknown/ambiguous symbol, unsupported chainId, or malformed address; InternalError on upstream 5xx.',
       inputSchema: GetQuoteInput,
     },
     async (args) => {
@@ -35,7 +33,7 @@ export function createServer(): McpServer {
     {
       title: 'Look up a CoW order by uid',
       description:
-        'Returns full order state — status, executed amounts, validTo, settlement tx if filled.',
+        'Returns full order state — status, executed amounts, validTo, settlement tx if filled. Addresses are EIP-55 checksummed. Throws InvalidRequest if the uid is malformed or not found, or chainId is unsupported.',
       inputSchema: GetOrderInput,
     },
     async (args) => {
@@ -51,7 +49,8 @@ export function createServer(): McpServer {
     'cow_get_trades',
     {
       title: 'Recent CoW trades for a wallet',
-      description: 'Trades for an owner address. Cap at 100 trades, default 25.',
+      description:
+        'Trades for an owner address. Cap at 100 trades, default 25. Each trade includes blockNumber, blockTimestamp (ISO, best-effort), and EIP-55 checksummed token addresses. Returns an empty array (not an error) when the owner has no trades. Throws InvalidRequest on malformed address or unsupported chainId.',
       inputSchema: GetTradesInput,
     },
     async (args) => {
@@ -83,7 +82,7 @@ export function createServer(): McpServer {
     {
       title: 'List supported tokens for a chain',
       description:
-        'Token metadata (symbol, name, decimals, logo) filtered by chainId and optional search.',
+        'Curated CoW token list (symbol, name, decimals, logo) filtered by chainId and optional search. Returns empty array when no tokens match (not an error). Coverage is best on mainnet; for unknown long-tail tokens, cow_get_order/cow_get_trades will fall back to on-chain symbol() reads. Throws InvalidRequest on unsupported chainId.',
       inputSchema: ListTokensInput,
     },
     async (args) => {
@@ -93,30 +92,6 @@ export function createServer(): McpServer {
         structuredContent: { tokens: result },
       };
     }
-  );
-
-  server.registerResource(
-    'cow_order',
-    orderTemplate,
-    {
-      title: 'CoW order',
-      description: 'Pinable order resource. Re-read to refresh status.',
-      mimeType: 'application/json',
-    },
-    async (uri, vars) =>
-      readOrder(uri, vars as { chainId: string | string[]; uid: string | string[] })
-  );
-
-  server.registerResource(
-    'cow_trades',
-    tradesTemplate,
-    {
-      title: 'CoW trades for a wallet',
-      description: 'Last 25 trades for an owner address.',
-      mimeType: 'application/json',
-    },
-    async (uri, vars) =>
-      readTrades(uri, vars as { chainId: string | string[]; owner: string | string[] })
   );
 
   return server;

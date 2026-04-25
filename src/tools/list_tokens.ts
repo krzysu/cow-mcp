@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { CHAINS, DEFAULT_CHAIN_ID, assertSupportedChain } from '../cow/chains.js';
+import { onChainTokenMeta } from '../cow/token_rpc.js';
 import { toMcpError, withRetry } from '../errors.js';
+import { checksumAddress, isAddress } from '../validators.js';
 
 // CoW + the Ethereum ecosystem use this sentinel to mean the chain's native
 // asset (ETH on mainnet, xDAI on Gnosis, etc.). The orderbook returns it as
@@ -81,18 +83,23 @@ export type TokenMeta = { symbol: string; decimals: number };
 
 /**
  * Resolve `{symbol, decimals}` for a batch of addresses on a given chain.
- * Returns a Map keyed by lowercased address. Unknown addresses are absent
- * from the map (curated list — long-tail / airdrop tokens won't be present).
+ * Returns a Map keyed by lowercased address.
+ *
+ * Tries the curated token list first, then falls back to an on-chain
+ * `symbol()` + `decimals()` multicall for the remainder. Addresses that
+ * resolve via neither path are absent from the returned map.
  */
 export async function lookupTokenMeta(
   chainId: number,
   addresses: string[]
 ): Promise<Map<string, TokenMeta>> {
   if (addresses.length === 0) return new Map();
-  await loadTokenList();
+  await loadTokenList().catch(() => undefined);
   const onChain = cached?.byAddress.get(chainId);
   const native = CHAINS[chainId]?.nativeSymbol;
   const out = new Map<string, TokenMeta>();
+  const unresolved: string[] = [];
+
   for (const addr of addresses) {
     const lower = addr.toLowerCase();
     if (lower === NATIVE_SENTINEL && native) {
@@ -101,8 +108,18 @@ export async function lookupTokenMeta(
       continue;
     }
     const t = onChain?.get(lower);
-    if (t) out.set(lower, { symbol: t.symbol, decimals: t.decimals });
+    if (t) {
+      out.set(lower, { symbol: t.symbol, decimals: t.decimals });
+      continue;
+    }
+    if (isAddress(addr)) unresolved.push(lower);
   }
+
+  if (unresolved.length > 0) {
+    const fromChain = await onChainTokenMeta(chainId, unresolved).catch(() => new Map());
+    for (const [addr, meta] of fromChain) out.set(addr, meta);
+  }
+
   return out;
 }
 
@@ -124,7 +141,7 @@ export async function listTokens(args: {
         )
       : onChain;
     return filtered.map((t) => ({
-      address: t.address,
+      address: checksumAddress(t.address),
       symbol: t.symbol,
       name: t.name,
       decimals: t.decimals,
@@ -135,8 +152,6 @@ export async function listTokens(args: {
   }
 }
 
-const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
-
 /**
  * Resolve a user-supplied token reference to a 0x address.
  *
@@ -145,7 +160,7 @@ const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
  * unknown or ambiguous symbols with the candidate addresses in the message.
  */
 export async function resolveToken(chainId: number, query: string): Promise<string> {
-  if (ADDRESS_RE.test(query)) return query;
+  if (isAddress(query)) return query;
 
   assertSupportedChain(chainId);
   const all = await withRetry(() => loadTokenList());

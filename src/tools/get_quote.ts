@@ -7,18 +7,26 @@ import { z } from 'zod';
 import { DEFAULT_CHAIN_ID } from '../cow/chains.js';
 import { ctx, getCow } from '../cow/client.js';
 import { toMcpError, withRetry } from '../errors.js';
+import { AddressSchema } from '../validators.js';
 import { resolveToken } from './list_tokens.js';
 
 export const GetQuoteInput = {
   chainId: z.number().int().default(DEFAULT_CHAIN_ID),
   sellToken: z
     .string()
+    .min(1)
     .describe('Sell token: 0x address or symbol like "WETH" (resolved per chain)'),
-  buyToken: z.string().describe('Buy token: 0x address or symbol like "USDC" (resolved per chain)'),
+  buyToken: z
+    .string()
+    .min(1)
+    .describe('Buy token: 0x address or symbol like "USDC" (resolved per chain)'),
   kind: z.enum(['sell', 'buy']),
-  amount: z.string().describe('Amount in base units (decimal string)'),
-  from: z.string().optional().describe('Trader address; improves quote accuracy'),
-  receiver: z.string().optional(),
+  amount: z
+    .string()
+    .regex(/^[1-9]\d*$/, 'amount must be a positive integer in base units (decimal string)')
+    .describe('Amount in base units (decimal string)'),
+  from: AddressSchema.optional().describe('Trader address; improves quote accuracy'),
+  receiver: AddressSchema.optional(),
   validFor: z
     .number()
     .int()

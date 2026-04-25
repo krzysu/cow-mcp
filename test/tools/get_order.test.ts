@@ -15,6 +15,10 @@ vi.mock('@cowprotocol/cow-sdk', async () => {
   };
 });
 
+vi.mock('../../src/cow/token_rpc.js', () => ({
+  onChainTokenMeta: vi.fn().mockResolvedValue(new Map()),
+}));
+
 const { getOrder } = await import('../../src/tools/get_order.js');
 const { __resetCow } = await import('../../src/cow/client.js');
 const { __resetTokenCache } = await import('../../src/tools/list_tokens.js');
@@ -121,5 +125,25 @@ describe('cow_get_order', () => {
       code: -32600,
       message: expect.stringContaining('not found'),
     });
+  });
+
+  it('returns EIP-55 checksummed addresses', async () => {
+    getOrderMock.mockResolvedValue({
+      uid: '0xabc',
+      owner: '0xd8da6bf26964af9d7eed9e03e53415d37aa96045',
+      status: 'open',
+      sellToken: '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2',
+      buyToken: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
+      sellAmount: '1',
+      buyAmount: '1',
+      executedSellAmount: '0',
+      executedBuyAmount: '0',
+      validTo: 1,
+      creationDate: '2025-01-01T00:00:00Z',
+    });
+    const out = await getOrder({ chainId: 1, uid: '0xabc' });
+    expect(out.owner).toBe('0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045');
+    expect(out.sellToken).toBe('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2');
+    expect(out.buyToken).toBe('0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48');
   });
 });

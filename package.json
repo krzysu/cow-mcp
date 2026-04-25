@@ -51,6 +51,7 @@
   "dependencies": {
     "@cowprotocol/cow-sdk": "9.0.2",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "viem": "^2.48.4",
     "zod": "^4.3.6"
   },
   "devDependencies": {

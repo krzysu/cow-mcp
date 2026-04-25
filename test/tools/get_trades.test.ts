@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as CowSdk from '@cowprotocol/cow-sdk';
 
 const getTradesMock = vi.fn();
+const blockTimestampsMock = vi.fn();
+const onChainTokenMetaMock = vi.fn();
 
 vi.mock('@cowprotocol/cow-sdk', async () => {
   const actual = await vi.importActual<typeof CowSdk>('@cowprotocol/cow-sdk');
@@ -11,14 +13,25 @@ vi.mock('@cowprotocol/cow-sdk', async () => {
   };
 });
 
+vi.mock('../../src/cow/block_time.js', () => ({
+  blockTimestamps: blockTimestampsMock,
+}));
+
+vi.mock('../../src/cow/token_rpc.js', () => ({
+  onChainTokenMeta: onChainTokenMetaMock,
+}));
+
 const { getTrades } = await import('../../src/tools/get_trades.js');
 const { __resetCow } = await import('../../src/cow/client.js');
 const { __resetTokenCache } = await import('../../src/tools/list_tokens.js');
 
+const SELL = '0x1111111111111111111111111111111111111111';
+const BUY = '0x2222222222222222222222222222222222222222';
+
 const tokenList = {
   tokens: [
-    { chainId: 1, address: '0xsell', symbol: 'WETH', name: 'Wrapped Ether', decimals: 18 },
-    { chainId: 1, address: '0xbuy', symbol: 'USDC', name: 'USD Coin', decimals: 6 },
+    { chainId: 1, address: SELL, symbol: 'WETH', name: 'Wrapped Ether', decimals: 18 },
+    { chainId: 1, address: BUY, symbol: 'USDC', name: 'USD Coin', decimals: 6 },
   ],
 };
 
@@ -27,8 +40,8 @@ function makeTrade(i: number) {
     orderUid: `0xuid${i}`,
     blockNumber: 100 + i,
     logIndex: i,
-    sellToken: '0xsell',
-    buyToken: '0xbuy',
+    sellToken: SELL,
+    buyToken: BUY,
     sellAmount: `${i}`,
     buyAmount: `${i * 2}`,
     txHash: `0xtx${i}`,
@@ -38,6 +51,8 @@ function makeTrade(i: number) {
 describe('cow_get_trades', () => {
   beforeEach(() => {
     getTradesMock.mockReset();
+    blockTimestampsMock.mockReset().mockResolvedValue(new Map());
+    onChainTokenMetaMock.mockReset().mockResolvedValue(new Map());
     __resetCow();
     __resetTokenCache();
     vi.stubGlobal(
@@ -84,19 +99,30 @@ describe('cow_get_trades', () => {
     getTradesMock.mockResolvedValue([makeTrade(0)]);
     const out = await getTrades({ chainId: 1, owner: '0xabc' });
     expect(out[0]).toMatchObject({
-      sellToken: '0xsell',
       sellTokenSymbol: 'WETH',
       sellTokenDecimals: 18,
-      buyToken: '0xbuy',
       buyTokenSymbol: 'USDC',
       buyTokenDecimals: 6,
     });
   });
 
-  it('omits symbol/decimals for unknown addresses', async () => {
-    getTradesMock.mockResolvedValue([
-      { ...makeTrade(0), sellToken: '0xunknown', buyToken: '0xbuy' },
-    ]);
+  it('falls back to on-chain symbol/decimals for tokens missing from curated list', async () => {
+    const longTail = '0x9999999999999999999999999999999999999999';
+    getTradesMock.mockResolvedValue([{ ...makeTrade(0), buyToken: longTail }]);
+    onChainTokenMetaMock.mockResolvedValue(
+      new Map([[longTail.toLowerCase(), { symbol: 'AIRDROP', decimals: 9 }]])
+    );
+    const out = await getTrades({ chainId: 1, owner: '0xabc' });
+    expect(onChainTokenMetaMock).toHaveBeenCalled();
+    expect(out[0]).toMatchObject({
+      buyTokenSymbol: 'AIRDROP',
+      buyTokenDecimals: 9,
+    });
+  });
+
+  it('omits symbol/decimals when on-chain fallback also fails', async () => {
+    const longTail = '0x9999999999999999999999999999999999999999';
+    getTradesMock.mockResolvedValue([{ ...makeTrade(0), sellToken: longTail }]);
     const out = await getTrades({ chainId: 1, owner: '0xabc' });
     expect(out[0]).not.toHaveProperty('sellTokenSymbol');
     expect(out[0]?.buyTokenSymbol).toBe('USDC');
@@ -114,5 +140,31 @@ describe('cow_get_trades', () => {
       buyTokenSymbol: 'ETH',
       buyTokenDecimals: 18,
     });
+  });
+
+  it('attaches blockTimestamp when RPC resolves the block', async () => {
+    getTradesMock.mockResolvedValue([makeTrade(0)]);
+    blockTimestampsMock.mockResolvedValue(new Map([[100, '2025-01-02T03:04:05.000Z']]));
+    const out = await getTrades({ chainId: 1, owner: '0xabc' });
+    expect(out[0]?.blockTimestamp).toBe('2025-01-02T03:04:05.000Z');
+  });
+
+  it('omits blockTimestamp when RPC fallback returns nothing', async () => {
+    getTradesMock.mockResolvedValue([makeTrade(0)]);
+    const out = await getTrades({ chainId: 1, owner: '0xabc' });
+    expect(out[0]).not.toHaveProperty('blockTimestamp');
+  });
+
+  it('returns EIP-55 checksummed token addresses', async () => {
+    getTradesMock.mockResolvedValue([
+      {
+        ...makeTrade(0),
+        sellToken: '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2',
+        buyToken: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
+      },
+    ]);
+    const out = await getTrades({ chainId: 1, owner: '0xabc' });
+    expect(out[0]?.sellToken).toBe('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2');
+    expect(out[0]?.buyToken).toBe('0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48');
   });
 });
