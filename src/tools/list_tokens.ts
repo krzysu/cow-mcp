@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { CHAINS, DEFAULT_CHAIN_ID, assertSupportedChain } from '../cow/chains.js';
-import { onChainTokenMeta } from '../cow/token_rpc.js';
+import { loadChainTokens, tokensByAddress } from '../cow/token_lists.js';
 import { toMcpError, withRetry } from '../errors.js';
 import { checksumAddress, isAddress } from '../validators.js';
 
@@ -23,82 +23,22 @@ export type TokenOutput = {
   logoURI?: string;
 };
 
-type RawToken = {
-  chainId: number;
-  address: string;
-  symbol: string;
-  name: string;
-  decimals: number;
-  logoURI?: string;
-};
-
-type TokenListJson = {
-  tokens: RawToken[];
-};
-
-// CowSwap.json is CoW's own curated multi-chain list (~266 tokens across all
-// supported chains, includes COW). CoinGecko.json from the same host is a
-// 243-token mainnet-only snapshot — don't use it.
-const TOKEN_LIST_URL = 'https://files.cow.fi/tokens/CowSwap.json';
-
-type Cache = {
-  tokens: RawToken[];
-  byAddress: Map<number, Map<string, RawToken>>;
-  fetchedAt: number;
-};
-
-let cached: Cache | undefined;
-const TTL_MS = 10 * 60 * 1000;
-
-function indexByAddress(tokens: RawToken[]): Map<number, Map<string, RawToken>> {
-  const idx = new Map<number, Map<string, RawToken>>();
-  for (const t of tokens) {
-    if (!t.address) continue;
-    let inner = idx.get(t.chainId);
-    if (!inner) {
-      inner = new Map();
-      idx.set(t.chainId, inner);
-    }
-    inner.set(t.address.toLowerCase(), t);
-  }
-  return idx;
-}
-
-async function loadTokenList(): Promise<RawToken[]> {
-  const now = Date.now();
-  if (cached && now - cached.fetchedAt < TTL_MS) {
-    return cached.tokens;
-  }
-  const res = await fetch(TOKEN_LIST_URL, { headers: { accept: 'application/json' } });
-  if (!res.ok) {
-    throw new Error(`token list fetch failed: ${res.status} ${res.statusText}`);
-  }
-  const json = (await res.json()) as TokenListJson;
-  const tokens = Array.isArray(json?.tokens) ? json.tokens : [];
-  cached = { tokens, byAddress: indexByAddress(tokens), fetchedAt: now };
-  return tokens;
-}
-
 export type TokenMeta = { symbol: string; decimals: number };
 
 /**
- * Resolve `{symbol, decimals}` for a batch of addresses on a given chain.
- * Returns a Map keyed by lowercased address.
- *
- * Tries the curated token list first, then falls back to an on-chain
- * `symbol()` + `decimals()` multicall for the remainder. Addresses that
- * resolve via neither path are absent from the returned map.
+ * Resolve `{symbol, decimals}` for a batch of addresses on a given chain
+ * against the per-chain token list. Returns a Map keyed by lowercased
+ * address. Addresses missing from the list are absent from the map — the
+ * caller treats that as "no enrichment" and surfaces the raw address.
  */
 export async function lookupTokenMeta(
   chainId: number,
   addresses: string[]
 ): Promise<Map<string, TokenMeta>> {
   if (addresses.length === 0) return new Map();
-  await loadTokenList().catch(() => undefined);
-  const onChain = cached?.byAddress.get(chainId);
+  const byAddress = await tokensByAddress(chainId).catch(() => new Map());
   const native = CHAINS[chainId]?.nativeSymbol;
   const out = new Map<string, TokenMeta>();
-  const unresolved: string[] = [];
 
   for (const addr of addresses) {
     const lower = addr.toLowerCase();
@@ -107,17 +47,8 @@ export async function lookupTokenMeta(
       out.set(lower, { symbol: native, decimals: 18 });
       continue;
     }
-    const t = onChain?.get(lower);
-    if (t) {
-      out.set(lower, { symbol: t.symbol, decimals: t.decimals });
-      continue;
-    }
-    if (isAddress(addr)) unresolved.push(lower);
-  }
-
-  if (unresolved.length > 0) {
-    const fromChain = await onChainTokenMeta(chainId, unresolved).catch(() => new Map());
-    for (const [addr, meta] of fromChain) out.set(addr, meta);
+    const t = byAddress.get(lower);
+    if (t) out.set(lower, { symbol: t.symbol, decimals: t.decimals });
   }
 
   return out;
@@ -129,17 +60,16 @@ export async function listTokens(args: {
 }): Promise<TokenOutput[]> {
   try {
     assertSupportedChain(args.chainId);
-    const all = await withRetry(() => loadTokenList());
-    const onChain = all.filter((t) => t.chainId === args.chainId);
+    const all = await withRetry(() => loadChainTokens(args.chainId));
     const q = args.search?.toLowerCase().trim();
     const filtered = q
-      ? onChain.filter(
+      ? all.filter(
           (t) =>
             t.symbol?.toLowerCase().includes(q) ||
             t.name?.toLowerCase().includes(q) ||
             t.address?.toLowerCase() === q
         )
-      : onChain;
+      : all;
     return filtered.map((t) => ({
       address: checksumAddress(t.address),
       symbol: t.symbol,
@@ -156,17 +86,16 @@ export async function listTokens(args: {
  * Resolve a user-supplied token reference to a 0x address.
  *
  * Accepts either a 40-char hex address (returned as-is) or a symbol like
- * `"WETH"` looked up against the chain's slice of the token list. Throws on
- * unknown or ambiguous symbols with the candidate addresses in the message.
+ * `"WETH"` looked up against the chain's token list. Throws on unknown or
+ * ambiguous symbols with the candidate addresses in the message.
  */
 export async function resolveToken(chainId: number, query: string): Promise<string> {
   if (isAddress(query)) return query;
 
   assertSupportedChain(chainId);
-  const all = await withRetry(() => loadTokenList());
-  const onChain = all.filter((t) => t.chainId === chainId);
+  const all = await withRetry(() => loadChainTokens(chainId));
   const q = query.toLowerCase().trim();
-  const matches = onChain.filter((t) => t.symbol?.toLowerCase() === q);
+  const matches = all.filter((t) => t.symbol?.toLowerCase() === q);
 
   if (matches.length === 0) {
     throw new Error(
@@ -182,7 +111,5 @@ export async function resolveToken(chainId: number, query: string): Promise<stri
   return matches[0]!.address;
 }
 
-/** Reset (test-only). */
-export function __resetTokenCache(): void {
-  cached = undefined;
-}
+/** Reset (test-only). Re-exported from token_lists for backwards-compatible test imports. */
+export { __resetTokenLists as __resetTokenCache } from '../cow/token_lists.js';

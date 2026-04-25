@@ -2,8 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as CowSdk from '@cowprotocol/cow-sdk';
 
 const getTradesMock = vi.fn();
-const blockTimestampsMock = vi.fn();
-const onChainTokenMetaMock = vi.fn();
 
 vi.mock('@cowprotocol/cow-sdk', async () => {
   const actual = await vi.importActual<typeof CowSdk>('@cowprotocol/cow-sdk');
@@ -12,14 +10,6 @@ vi.mock('@cowprotocol/cow-sdk', async () => {
     OrderBookApi: vi.fn().mockImplementation(() => ({ getTrades: getTradesMock })),
   };
 });
-
-vi.mock('../../src/cow/block_time.js', () => ({
-  blockTimestamps: blockTimestampsMock,
-}));
-
-vi.mock('../../src/cow/token_rpc.js', () => ({
-  onChainTokenMeta: onChainTokenMetaMock,
-}));
 
 const { getTrades } = await import('../../src/tools/get_trades.js');
 const { __resetCow } = await import('../../src/cow/client.js');
@@ -51,8 +41,6 @@ function makeTrade(i: number) {
 describe('cow_get_trades', () => {
   beforeEach(() => {
     getTradesMock.mockReset();
-    blockTimestampsMock.mockReset().mockResolvedValue(new Map());
-    onChainTokenMetaMock.mockReset().mockResolvedValue(new Map());
     __resetCow();
     __resetTokenCache();
     vi.stubGlobal(
@@ -83,10 +71,22 @@ describe('cow_get_trades', () => {
     expect(out).toHaveLength(100);
   });
 
-  it('passes owner filter and chain context to the orderbook', async () => {
+  it('passes owner, limit, offset, and chain context to the orderbook', async () => {
     getTradesMock.mockResolvedValue([]);
     await getTrades({ chainId: 100, owner: '0xowner' });
-    expect(getTradesMock).toHaveBeenCalledWith({ owner: '0xowner' }, { chainId: 100 });
+    expect(getTradesMock).toHaveBeenCalledWith(
+      { owner: '0xowner', limit: 25, offset: 0 },
+      { chainId: 100 }
+    );
+  });
+
+  it('forwards explicit pagination args', async () => {
+    getTradesMock.mockResolvedValue([]);
+    await getTrades({ chainId: 1, owner: '0xowner', limit: 10, offset: 30 });
+    expect(getTradesMock).toHaveBeenCalledWith(
+      { owner: '0xowner', limit: 10, offset: 30 },
+      { chainId: 1 }
+    );
   });
 
   it('coerces null txHash to empty string', async () => {
@@ -106,21 +106,7 @@ describe('cow_get_trades', () => {
     });
   });
 
-  it('falls back to on-chain symbol/decimals for tokens missing from curated list', async () => {
-    const longTail = '0x9999999999999999999999999999999999999999';
-    getTradesMock.mockResolvedValue([{ ...makeTrade(0), buyToken: longTail }]);
-    onChainTokenMetaMock.mockResolvedValue(
-      new Map([[longTail.toLowerCase(), { symbol: 'AIRDROP', decimals: 9 }]])
-    );
-    const out = await getTrades({ chainId: 1, owner: '0xabc' });
-    expect(onChainTokenMetaMock).toHaveBeenCalled();
-    expect(out[0]).toMatchObject({
-      buyTokenSymbol: 'AIRDROP',
-      buyTokenDecimals: 9,
-    });
-  });
-
-  it('omits symbol/decimals when on-chain fallback also fails', async () => {
+  it('omits symbol/decimals for tokens absent from the list', async () => {
     const longTail = '0x9999999999999999999999999999999999999999';
     getTradesMock.mockResolvedValue([{ ...makeTrade(0), sellToken: longTail }]);
     const out = await getTrades({ chainId: 1, owner: '0xabc' });
@@ -140,19 +126,6 @@ describe('cow_get_trades', () => {
       buyTokenSymbol: 'ETH',
       buyTokenDecimals: 18,
     });
-  });
-
-  it('attaches blockTimestamp when RPC resolves the block', async () => {
-    getTradesMock.mockResolvedValue([makeTrade(0)]);
-    blockTimestampsMock.mockResolvedValue(new Map([[100, '2025-01-02T03:04:05.000Z']]));
-    const out = await getTrades({ chainId: 1, owner: '0xabc' });
-    expect(out[0]?.blockTimestamp).toBe('2025-01-02T03:04:05.000Z');
-  });
-
-  it('omits blockTimestamp when RPC fallback returns nothing', async () => {
-    getTradesMock.mockResolvedValue([makeTrade(0)]);
-    const out = await getTrades({ chainId: 1, owner: '0xabc' });
-    expect(out[0]).not.toHaveProperty('blockTimestamp');
   });
 
   it('returns EIP-55 checksummed token addresses', async () => {

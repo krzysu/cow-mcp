@@ -1,7 +1,7 @@
 {
   "name": "cow-mcp",
   "version": "0.1.0",
-  "description": "MCP server exposing CoW Protocol to AI agents (read-only v0.1).",
+  "description": "MCP server exposing CoW Protocol to AI agents (quote / build / submit / cancel).",
   "type": "module",
   "bin": {
     "cow-mcp": "dist/index.js"
@@ -19,8 +19,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src test --ext .ts --cache --cache-location node_modules/.cache/eslint",
     "lint:fix": "eslint src test --ext .ts --fix --cache --cache-location node_modules/.cache/eslint",
-    "prettier:check": "prettier --check \"{src,test}/**/*.{ts,md,json}\" \"*.{md,json}\"",
-    "prettier:write": "prettier --write \"{src,test}/**/*.{ts,md,json}\" \"*.{md,json}\"",
+    "prettier:check": "prettier --check \"{src,test,skills,docs}/**/*.{ts,md,json}\" \"*.{md,json}\"",
+    "prettier:write": "prettier --write \"{src,test,skills,docs}/**/*.{ts,md,json}\" \"*.{md,json}\"",
     "check": "pnpm typecheck && pnpm prettier:check && pnpm lint && pnpm test",
     "fix": "pnpm prettier:write && pnpm lint:fix",
     "test": "vitest run",

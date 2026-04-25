@@ -15,10 +15,6 @@ vi.mock('@cowprotocol/cow-sdk', async () => {
   };
 });
 
-vi.mock('../../src/cow/token_rpc.js', () => ({
-  onChainTokenMeta: vi.fn().mockResolvedValue(new Map()),
-}));
-
 const { getOrder } = await import('../../src/tools/get_order.js');
 const { __resetCow } = await import('../../src/cow/client.js');
 const { __resetTokenCache } = await import('../../src/tools/list_tokens.js');
