@@ -136,6 +136,12 @@ pnpm build        # compile to dist/
 
 To point an MCP client at a local checkout instead of the published package, swap `npx -y cow-mcp` for `node /absolute/path/to/cow-mcp/dist/index.js` in the config above.
 
+### Dev Container (optional)
+
+A `.devcontainer/devcontainer.json` is available if you'd like to develop inside an isolated container — `pnpm install` and `pnpm test` run in Docker, your host machine never sees `node_modules` or executes dependency code. Useful as a guard against npm supply-chain attacks.
+
+Install [OrbStack](https://orbstack.dev) (or Docker Desktop) and the **Dev Containers** extension for VS Code/Cursor, then open the repo and pick **"Reopen in Container"**. See [`.devcontainer/README.md`](.devcontainer/README.md) for the security choices baked in. This is entirely optional; `pnpm install` on the host works exactly as before.
+
 ## License
 
 MIT

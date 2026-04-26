@@ -1,0 +1,24 @@
+{
+  "name": "cow-mcp",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:22",
+  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
+  "mounts": ["source=cow-mcp-node-modules,target=/workspace/node_modules,type=volume"],
+  "remoteUser": "node",
+  "containerEnv": {
+    "SSH_AUTH_SOCK": "",
+    "COREPACK_ENABLE_DOWNLOAD_PROMPT": "0"
+  },
+  "updateRemoteUserUID": true,
+  "onCreateCommand": "sudo chown -R node:node /workspace/node_modules",
+  "postCreateCommand": "sudo corepack enable && corepack prepare pnpm@10.32.1 --activate && pnpm config set store-dir /workspace/node_modules/.pnpm-store && pnpm config set ignore-scripts true && pnpm install && pnpm rebuild",
+  "customizations": {
+    "vscode": {
+      "extensions": ["dbaeumer.vscode-eslint", "esbenp.prettier-vscode", "vitest.explorer"],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "remote.SSH.enableAgentForwarding": false
+      }
+    }
+  }
+}
