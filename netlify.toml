@@ -1,0 +1,7 @@
+[build]
+  command = "pnpm install --frozen-lockfile"
+  publish = "public"
+
+[functions]
+  node_bundler = "esbuild"
+  directory = "netlify/functions"

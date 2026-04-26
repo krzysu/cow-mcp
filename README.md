@@ -6,15 +6,36 @@ MCP (Model Context Protocol) server exposing [CoW Protocol](https://cow.fi) to A
 
 ## Install
 
-cow-mcp is a stdio MCP server, so any MCP-compatible client works (Claude Code, Claude Desktop, Cursor, Cline, Continue, …). Requires Node 20+ on the host machine.
+### Hosted (HTTP)
 
-### Claude Code
+Public deployment: `https://cow-mcp.netlify.app/mcp`. Works with any MCP client that speaks Streamable HTTP — claude.ai web, Claude Desktop, Claude Code, Cursor, ChatGPT, and others.
+
+```bash
+claude mcp add cow-mcp -s project --transport http https://cow-mcp.netlify.app/mcp
+```
+
+`.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "cow-mcp": {
+      "type": "http",
+      "url": "https://cow-mcp.netlify.app/mcp"
+    }
+  }
+}
+```
+
+### Local (stdio via `npx`)
+
+Requires Node 20+.
 
 ```bash
 claude mcp add cow-mcp -s project -- npx -y cow-mcp
 ```
 
-Or commit a project-level `.mcp.json`:
+`.mcp.json`:
 
 ```json
 {
@@ -27,29 +48,27 @@ Or commit a project-level `.mcp.json`:
 }
 ```
 
-### Other clients
+Other clients: refer to their docs for the exact config field name.
 
-Any client that speaks stdio MCP can launch `npx -y cow-mcp` directly — refer to its docs for the exact config file shape.
+### Environment variables (local mode only)
 
-### Environment variables
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `COW_RPC_URL_<CHAIN_ID>` | tries the chain's `*.publicnode.com` endpoint first, falls back to viem's bundled chain RPC | Pin a single per-chain RPC for `cow_check_approval`'s `allowance()` read. Set this if you see `cow_check_approval` time out or want to use a private/paid endpoint. Example: `COW_RPC_URL_8453=https://mainnet.base.org` |
+| Variable | Purpose |
+| --- | --- |
+| `COW_RPC_URL_<CHAIN_ID>` | Pin a per-chain RPC for `cow_check_approval`. Defaults to the chain's `*.publicnode.com` then viem's bundled RPC. Example: `COW_RPC_URL_8453=https://mainnet.base.org` |
 
 ## Try it
 
-One prompt per use case — keep them tight, the agent chains tools on its own.
+| Use case             | Prompt                                                            |
+| -------------------- | ----------------------------------------------------------------- |
+| Quote a swap         | "Quote 1 WETH for USDC on Arbitrum."                              |
+| Inspect an order     | "What's the status of order `0xabc…`?"                            |
+| Wallet trade history | "Show me vitalik.eth's last 10 CoW trades on mainnet."            |
+| Find a token         | "Is there a COW token on Gnosis? Give me the address."            |
+| Place a swap         | "Sell 0.1 WETH for USDC on Sepolia from `0x…`. Default slippage." |
+| Cancel an open order | "Cancel order `0xabc…`."                                          |
+| Check approval       | "Have I approved USDC for CoW on Base, owner `0x…`?"              |
 
-| Use case                   | Prompt                                                            |
-| -------------------------- | ----------------------------------------------------------------- |
-| Quote a swap               | "Quote 1 WETH for USDC on Arbitrum."                              |
-| Inspect an order           | "What's the status of order `0xabc…`?"                            |
-| Wallet trade history       | "Show me vitalik.eth's last 10 CoW trades on mainnet."            |
-| Find a token               | "Is there a COW token on Gnosis? Give me the address."            |
-| Place a swap (with signer) | "Sell 0.1 WETH for USDC on Sepolia from `0x…`. Default slippage." |
-| Cancel an open order       | "Cancel order `0xabc…`."                                          |
-| Check approval             | "Have I approved USDC for CoW on Base, owner `0x…`?"              |
+For the full natural-language → swap recipe (intent parsing, confirmation, approval, build, sign, submit, poll), load `skills/cow-swap/SKILL.md` into your host.
 
 ## Tools
 
@@ -74,6 +93,10 @@ One prompt per use case — keep them tight, the agent chains tools on its own.
 | `cow_check_approval` | Read on-chain `allowance(owner, vaultRelayer)` for a sell token |
 | `cow_build_approval` | Encode `approve()` calldata for the GPv2 vault relayer (host sends it) |
 
+`sellToken` / `buyToken` accept either a `0x` address or a token symbol (e.g. `"WETH"`). Symbols resolve against per-chain CoW token lists; unknown or ambiguous symbols return a hint to call `cow_list_tokens`.
+
+Every tool takes a `chainId` (defaults to `1`). Use `cow_list_chains` to enumerate at runtime.
+
 ## Swap flow
 
 ```
@@ -92,38 +115,18 @@ Cancel works the same way: `cow_build_cancellation(uid)` → host signs → `cow
 
 > **`appData` round-trip:** `cow_build_order` returns `appData` as an inline JSON string. Pass that **exact** string back to `cow_submit_order` — re-serializing it (even with the same keys) changes the keccak-256 hash and the orderbook will reject the signature.
 
-### Symbol resolution
-
-`cow_get_quote` and `cow_build_order` accept either a `0x` address or a token symbol (e.g. `"WETH"`, `"USDC"`) for `sellToken` / `buyToken`. Symbols are resolved against per-chain CoW-hosted token lists (CoinGecko + Uniswap mirrors at `files.cow.fi/token-lists/<src>.<chainId>.json`, cached 10 min per chain). Unknown symbols return a hint to call `cow_list_tokens`; ambiguous symbols return all candidate addresses so the agent can disambiguate.
-
-## Cross-chain
-
-This MCP wraps CoW's **single-chain** orderbook only — both legs of an order must be on the same chain. CoW Protocol itself supports cross-chain swaps via `@cowprotocol/sdk-bridging` (Across, Bungee, Near Intents), but that surface isn't exposed here yet.
-
-Every tool takes a `chainId` parameter, so an agent can quote on Ethereum, pull trades from Arbitrum, and list tokens on Base in the same session. `chainId` defaults to `1` (Ethereum) when omitted.
-
-Supported chains (all CoW Protocol chains, sourced from `@cowprotocol/cow-sdk` so they stay in sync): Ethereum, BNB Chain, Gnosis, Polygon, Base, Plasma, Arbitrum One, Avalanche, Ink, Linea, Sepolia. Use `cow_list_chains` to enumerate at runtime.
-
 ## Wallet boundary
 
-cow-mcp does not sign and does not broadcast transactions. The agent is responsible for getting `typedData` (from `cow_build_order` / `cow_build_cancellation`) signed by the host wallet, and for getting approval calldata (from `cow_build_approval`) submitted on-chain.
+cow-mcp does not sign and does not broadcast. Signing `typedData` and submitting approval calldata is the host wallet's job — keeping cow-mcp compatible with any wallet integration (local keystore, EIP-1193, Safe / 4337 with `signingScheme: "eip1271"`, embedded MPC).
 
-This keeps cow-mcp compatible with any wallet integration: a local keystore via [viem accounts](https://viem.sh/docs/accounts/local), an EIP-1193 provider over WalletConnect, a Safe / 4337 smart account (with `signingScheme: "eip1271"`), or an embedded MPC provider (Privy, Turnkey, …). The signing process is out of scope for this repo.
-
-A static unit test (`test/no_keys.test.ts`) enforces that `src/` contains no `signTypedData`, `sendTransaction`, or `privateKey*` references.
+`cow_submit_order` and `cow_submit_cancellation` require user confirmation via [MCP elicitation](https://modelcontextprotocol.io/specification/draft/client/elicitation); hosts without elicitation support fall through to the skill-level gate.
 
 ## Known limitations
 
-- **No trade timestamps.** The orderbook `/trades` endpoint doesn't return a date field, only `blockNumber` / `logIndex`. If you need a timestamp, call `cow_get_order(uid)` per trade — `creationDate` lives on the order, not the trade.
-- **`cow_check_approval` is the one on-chain read.** Allowance has no off-chain mirror in the orderbook API, so this single tool talks to an RPC. Everything else is a thin wrapper around CoW's HTTP API.
-
-## Skills
-
-`skills/cow-swap/SKILL.md` ships a recipe for the full natural-language → swap flow: parse intent, quote, confirmation gate, approval gate, build, route signing (to a signer MCP tool if available, otherwise manual paste-back), submit, poll. Load it into your host (Claude Code, Claude Desktop, …) per its docs.
+- **Single-chain orderbook only.** Both legs of an order must be on the same chain. Cross-chain (CoW's `@cowprotocol/sdk-bridging`) isn't exposed yet.
+- **No trade timestamps.** The orderbook `/trades` endpoint returns only `blockNumber` / `logIndex`. Call `cow_get_order(uid)` per trade if you need `creationDate`.
 
 ## Development
-
-Local clone for hacking on cow-mcp itself:
 
 ```bash
 pnpm install
@@ -134,13 +137,9 @@ pnpm fix          # prettier --write + eslint --fix
 pnpm build        # compile to dist/
 ```
 
-To point an MCP client at a local checkout instead of the published package, swap `npx -y cow-mcp` for `node /absolute/path/to/cow-mcp/dist/index.js` in the config above.
+To point an MCP client at a local checkout, swap `npx -y cow-mcp` for `node /absolute/path/to/cow-mcp/dist/index.js`.
 
-### Dev Container (optional)
-
-A `.devcontainer/devcontainer.json` is available if you'd like to develop inside an isolated container — `pnpm install` and `pnpm test` run in Docker, your host machine never sees `node_modules` or executes dependency code. Useful as a guard against npm supply-chain attacks.
-
-Install [OrbStack](https://orbstack.dev) (or Docker Desktop) and the **Dev Containers** extension for VS Code/Cursor, then open the repo and pick **"Reopen in Container"**. See [`.devcontainer/README.md`](.devcontainer/README.md) for the security choices baked in. This is entirely optional; `pnpm install` on the host works exactly as before.
+A Dev Container config (`.devcontainer/`) is available for isolated development inside Docker — useful as a guard against npm supply-chain attacks. See [`.devcontainer/README.md`](.devcontainer/README.md).
 
 ## License
 

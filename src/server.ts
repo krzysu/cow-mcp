@@ -1,4 +1,5 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { confirmDestructive } from './elicit.js';
 import { BuildApprovalInput, buildApproval } from './tools/build_approval.js';
 import { BuildCancellationInput, buildCancellation } from './tools/build_cancellation.js';
 import { BuildOrderInput, buildOrder } from './tools/build_order.js';
@@ -122,10 +123,21 @@ export function createServer(): McpServer {
     {
       title: 'Submit a signed CoW order',
       description:
-        'Post a signed order to the CoW orderbook. Pass the order fields exactly as built by cow_build_order, plus the signature your wallet produced over the typedData. Returns { uid }. Throws InvalidRequest on signature mismatch, insufficient allowance/balance, or unsupported chain.',
+        'Post a signed order to the CoW orderbook. Pass the order fields exactly as built by cow_build_order, plus the signature your wallet produced over the typedData. Returns { uid }. Hosts that advertise `elicitation` capability are prompted to confirm before submission. Throws InvalidRequest on signature mismatch, insufficient allowance/balance, or unsupported chain.',
       inputSchema: SubmitOrderInput,
     },
-    async (args) => {
+    async (args, extra) => {
+      const confirm = await confirmDestructive(
+        server,
+        `Submit ${args.order.kind} order on chain ${args.chainId}: sell ${args.order.sellAmount} of ${args.order.sellToken} for ${args.order.buyAmount} of ${args.order.buyToken} from ${args.order.from}.`,
+        extra.signal
+      );
+      if (!confirm.proceed) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: `cow_submit_order: ${confirm.reason}` }],
+        };
+      }
       const result = await submitOrder(args);
       return {
         content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
@@ -156,10 +168,21 @@ export function createServer(): McpServer {
     {
       title: 'Submit a signed CoW order cancellation',
       description:
-        'Post a signed off-chain cancellation. Returns { ok: true } on success. Throws InvalidRequest on signature mismatch or wrong owner.',
+        'Post a signed off-chain cancellation. Returns { ok: true } on success. Hosts that advertise `elicitation` capability are prompted to confirm before submission. Throws InvalidRequest on signature mismatch or wrong owner.',
       inputSchema: SubmitCancellationInput,
     },
-    async (args) => {
+    async (args, extra) => {
+      const confirm = await confirmDestructive(
+        server,
+        `Cancel CoW order ${args.uid} on chain ${args.chainId}.`,
+        extra.signal
+      );
+      if (!confirm.proceed) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: `cow_submit_cancellation: ${confirm.reason}` }],
+        };
+      }
       const result = await submitCancellation(args);
       return {
         content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
